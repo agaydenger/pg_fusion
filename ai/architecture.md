@@ -60,8 +60,12 @@ page-backed Arrow batches.
    estimates each PostgreSQL leaf from the same pushed-down scan SQL that will
    later become a scan descriptor, maps join columns back to PostgreSQL attnums,
    and uses NDV/null fractions plus relation-wide unique keys for equi-join
-   selectivity. Ineligible join shapes keep their DataFusion order. Scan leaves
-   are then lowered to `PgScanNode`/`scan_sql` descriptors. Non-recursive CTEs
+   selectivity. The `join_order` solution also chooses the hash build side for
+   each binary join; `plan_builder` emits that side as the DataFusion left
+   child because `CollectLeft` hash joins build the left input, then restores
+   the original visible output order with a projection when needed. Ineligible
+   join shapes keep their DataFusion order. Scan leaves are then lowered to
+   `PgScanNode`/`scan_sql` descriptors. Non-recursive CTEs
    referenced more than once are planned as `PgCteRefNode` reads over a single
    lowered CTE producer so worker execution materializes the CTE once and
    reuses the owned batches. PostgreSQL text-like columns are represented as

@@ -9,7 +9,7 @@ use datafusion_expr::logical_plan::{
 };
 use datafusion_expr::Expr;
 use df_catalog::ResolvedTable;
-use join_order::{rel_bit, Edge, EdgeFlags, JoinKind, Problem, RelSet, RelStats};
+use join_order::{rel_bit, BuildSide, Edge, EdgeFlags, JoinKind, Problem, RelSet, RelStats};
 use pg_statistics::{
     estimate_equi_join_selectivity, EquiJoinInput, EstimateOptions, PgColumnStats, PgScanEstimate,
     PgUniqueKey,
@@ -496,9 +496,13 @@ fn build_join_tree(
     let best = solution.best(set).ok_or_else(|| {
         PlanBuildError::JoinReorder(format!("join_order solution has no entry for set {set:#x}"))
     })?;
-    let left = build_join_tree(best.left, solution, component)?;
-    let right = build_join_tree(best.right, solution, component)?;
-    let on = predicates_crossing_split(best.left, best.right, &component.predicates);
+    let (left_set, right_set) = match best.build_side {
+        BuildSide::Left => (best.left, best.right),
+        BuildSide::Right => (best.right, best.left),
+    };
+    let left = build_join_tree(left_set, solution, component)?;
+    let right = build_join_tree(right_set, solution, component)?;
+    let on = predicates_crossing_split(left_set, right_set, &component.predicates);
     let schema = build_join_schema(left.schema(), right.schema(), &JoinType::Inner)?;
     Ok(LogicalPlan::Join(Join {
         left: Arc::new(left),

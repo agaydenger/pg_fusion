@@ -77,6 +77,12 @@ fractions and clamped when the join columns cover a unique key. Partial unique
 indexes are deliberately ignored by `pg_statistics`, because they are not
 relation-wide keys unless predicate implication is modeled.
 
+The `join_order` solution also carries the preferred hash build side for every
+binary join. When rebuilding DataFusion logical joins, `plan_builder` orients
+that build side as the left child because DataFusion's `CollectLeft` hash join
+mode builds the left input. If this changes the visible column order,
+`plan_builder` restores the original output schema with a projection.
+
 The pass is intentionally conservative: unsupported join shapes are left
 unchanged, while statistics/optimizer errors are returned as planning errors
 when join reordering is explicitly enabled. The extension exposes this through

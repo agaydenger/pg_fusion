@@ -224,6 +224,20 @@ fn filtered_dimension_changes_join_order() {
 }
 
 #[test]
+fn smaller_relation_is_chosen_as_hash_build_side() {
+    let problem = problem(
+        &[1_000_000.0, 100.0],
+        vec![Edge::inner(rel_bit(0), rel_bit(1), 0.000001)],
+    );
+
+    let solution = optimize(&problem, unbounded_config()).unwrap();
+    let root = solution.best(solution.root()).unwrap();
+    assert_eq!(root.left, rel_bit(0));
+    assert_eq!(root.right, rel_bit(1));
+    assert_eq!(root.build_side, BuildSide::Right);
+}
+
+#[test]
 fn cycle_applies_all_predicates_between_two_sides() {
     let problem = problem(
         &[100.0, 100.0, 100.0],

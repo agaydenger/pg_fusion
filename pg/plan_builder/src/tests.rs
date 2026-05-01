@@ -232,6 +232,38 @@ fn bottom_join_on(plan: &LogicalPlan) -> Option<String> {
     }
 }
 
+fn top_join_child_relation_names(plan: &LogicalPlan) -> Option<(String, String)> {
+    let join = top_join(plan)?;
+    Some((
+        pg_scan_relation_name(&join.left)?,
+        pg_scan_relation_name(&join.right)?,
+    ))
+}
+
+fn top_join(plan: &LogicalPlan) -> Option<&datafusion_expr::logical_plan::Join> {
+    match plan {
+        LogicalPlan::Join(join) => Some(join),
+        LogicalPlan::Projection(projection) => top_join(&projection.input),
+        LogicalPlan::Filter(filter) => top_join(&filter.input),
+        LogicalPlan::SubqueryAlias(alias) => top_join(&alias.input),
+        _ => None,
+    }
+}
+
+fn pg_scan_relation_name(plan: &LogicalPlan) -> Option<String> {
+    match plan {
+        LogicalPlan::Extension(extension) => extension
+            .node
+            .as_any()
+            .downcast_ref::<PgScanNode>()
+            .map(|node| node.spec().relation.table.clone()),
+        LogicalPlan::Projection(projection) => pg_scan_relation_name(&projection.input),
+        LogicalPlan::Filter(filter) => pg_scan_relation_name(&filter.input),
+        LogicalPlan::SubqueryAlias(alias) => pg_scan_relation_name(&alias.input),
+        _ => None,
+    }
+}
+
 #[test]
 fn builds_simple_query_with_one_pg_scan_node() {
     let built = build_sql("SELECT id, name FROM users WHERE id > 10");
@@ -505,7 +537,7 @@ fn join_reordering_uses_filtered_statistics_for_inner_join_components() {
     assert_eq!(built.scans.len(), 3);
     assert_eq!(
         bottom_join_on(&built.logical_plan).as_deref(),
-        Some("u.id = o.user_id")
+        Some("o.user_id = u.id")
     );
 }
 
@@ -532,6 +564,37 @@ fn join_reordering_preserves_original_output_order() {
             (Some("u".into()), "score".into()),
             (Some("i".into()), "id".into()),
             (Some("i".into()), "user_id".into()),
+            (Some("o".into()), "id".into()),
+            (Some("o".into()), "user_id".into()),
+        ]
+    );
+}
+
+#[test]
+fn join_reordering_orients_smaller_build_side_left_for_collect_left_hash_join() {
+    let built = build_sql(
+        "SELECT * \
+         FROM users u \
+         JOIN orders o ON u.id = o.user_id",
+    );
+
+    assert_eq!(
+        top_join_child_relation_names(&built.logical_plan),
+        Some(("orders".to_owned(), "users".to_owned()))
+    );
+
+    let fields = built
+        .logical_plan
+        .schema()
+        .iter()
+        .map(|(qualifier, field)| (qualifier.map(ToString::to_string), field.name().to_owned()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        vec![
+            (Some("u".into()), "id".into()),
+            (Some("u".into()), "name".into()),
+            (Some("u".into()), "score".into()),
             (Some("o".into()), "id".into()),
             (Some("o".into()), "user_id".into()),
         ]
