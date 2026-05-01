@@ -57,6 +57,16 @@ mod tests {
     }
 
     #[pg_test]
+    fn pg_fusion_planner_catalog_bypass_smoke() {
+        super::smoke_tests::planner_catalog_bypass_smoke();
+    }
+
+    #[pg_test]
+    fn pg_fusion_planner_bound_params_bypass_smoke() {
+        super::smoke_tests::planner_bound_params_bypass_smoke();
+    }
+
+    #[pg_test]
     fn pg_fusion_heap_select_single_row_smoke() {
         super::smoke_tests::heap_select_single_row_smoke();
     }

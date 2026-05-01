@@ -8,8 +8,8 @@ use datafusion::logical_expr::LogicalPlan;
 use pgrx::pg_sys::SysCacheIdentifier::TYPEOID;
 use pgrx::pg_sys::{
     list_append_unique_ptr, list_make1_impl, palloc0, planner_hook, planner_hook_type,
-    standard_planner, CustomScan, List, ListCell, NodeTag, Oid, ParamListInfo, Plan, PlannedStmt,
-    Query,
+    standard_planner, CommonTableExpr, CustomScan, List, ListCell, NodeTag, Oid, ParamListInfo,
+    Plan, PlannedStmt, Query, RangeTblEntry,
 };
 use pgrx::prelude::*;
 
@@ -38,6 +38,7 @@ unsafe extern "C-unwind" fn pg_fusion_planner_hook(
             && (*parse).commandType == pgrx::pg_sys::CmdType::CMD_SELECT
             && !(*parse).hasModifyingCTE
             && !is_pg_fusion_management_sql(query_string)
+            && !should_bypass_pg_fusion_planner(parse, bound_params)
         {
             return build_planned_custom_scan(parse, query_string, bound_params);
         }
@@ -59,6 +60,85 @@ unsafe fn is_pg_fusion_management_sql(query_string: *const c_char) -> bool {
     };
     let sql = sql.to_ascii_lowercase();
     sql.contains("pg_fusion_metrics(") || sql.contains("pg_fusion_metrics_reset(")
+}
+
+unsafe fn should_bypass_pg_fusion_planner(parse: *mut Query, bound_params: ParamListInfo) -> bool {
+    has_bound_params(bound_params) || query_requires_vanilla_planner(parse)
+}
+
+unsafe fn has_bound_params(bound_params: ParamListInfo) -> bool {
+    !bound_params.is_null() && (*bound_params).numParams > 0
+}
+
+unsafe fn query_requires_vanilla_planner(parse: *mut Query) -> bool {
+    if parse.is_null() {
+        return false;
+    }
+
+    rtable_requires_vanilla_planner((*parse).rtable)
+        || cte_list_requires_vanilla_planner((*parse).cteList)
+}
+
+unsafe fn rtable_requires_vanilla_planner(rtable: *mut List) -> bool {
+    for index in 0..list_len(rtable) {
+        let rte = list_ptr_at(rtable, index) as *mut RangeTblEntry;
+        if rte.is_null() {
+            continue;
+        }
+        match (*rte).rtekind {
+            pgrx::pg_sys::RTEKind::RTE_RELATION => {
+                if relation_is_catalog_or_toast((*rte).relid) {
+                    return true;
+                }
+            }
+            pgrx::pg_sys::RTEKind::RTE_SUBQUERY => {
+                if query_requires_vanilla_planner((*rte).subquery) {
+                    return true;
+                }
+            }
+            pgrx::pg_sys::RTEKind::RTE_FUNCTION | pgrx::pg_sys::RTEKind::RTE_TABLEFUNC => {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+unsafe fn cte_list_requires_vanilla_planner(cte_list: *mut List) -> bool {
+    for index in 0..list_len(cte_list) {
+        let cte = list_ptr_at(cte_list, index) as *mut CommonTableExpr;
+        if cte.is_null() || (*cte).ctequery.is_null() {
+            continue;
+        }
+        if (*(*cte).ctequery).type_ != NodeTag::T_Query {
+            continue;
+        }
+        if query_requires_vanilla_planner((*cte).ctequery as *mut Query) {
+            return true;
+        }
+    }
+    false
+}
+
+unsafe fn relation_is_catalog_or_toast(relid: Oid) -> bool {
+    let namespace = pgrx::pg_sys::get_rel_namespace(relid);
+    pgrx::pg_sys::IsCatalogNamespace(namespace) || pgrx::pg_sys::IsToastNamespace(namespace)
+}
+
+unsafe fn list_len(list: *mut List) -> i32 {
+    if list.is_null() {
+        0
+    } else {
+        (*list).length
+    }
+}
+
+unsafe fn list_ptr_at(list: *mut List, index: i32) -> *mut c_void {
+    if list.is_null() || index < 0 || index >= (*list).length {
+        return null_mut();
+    }
+    (*(*list).elements.offset(index as isize)).ptr_value
 }
 
 #[pg_guard]

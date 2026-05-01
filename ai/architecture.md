@@ -54,7 +54,11 @@ page-backed Arrow batches.
 
 ## Data Path
 
-1. Backend planning resolves PostgreSQL catalog metadata, runs DataFusion
+1. Backend planning first keeps PostgreSQL-owned service paths out of
+   `pg_fusion`: the planner hook bypasses DataFusion planning for queries with
+   bind parameters, relations in `pg_catalog`/TOAST namespaces, or
+   function/table-function range entries produced by PostgreSQL rewrite, then
+   resolves PostgreSQL catalog metadata for eligible user queries, runs DataFusion
    logical optimization, then uses `pg_statistics` plus `join_order` to reorder
    eligible inner/cross join components before scan lowering. The reorder pass
    estimates each PostgreSQL leaf from the same pushed-down scan SQL that will

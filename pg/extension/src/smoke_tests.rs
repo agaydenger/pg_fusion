@@ -159,6 +159,91 @@ pub(crate) fn explain_smoke() {
     );
 }
 
+pub(crate) fn planner_catalog_bypass_smoke() {
+    let mut client = smoke_client();
+    let mut tx = smoke_transaction(&mut client);
+
+    let catalog_explain = simple_query_first_column_rows_tx(
+        &mut tx,
+        "EXPLAIN SELECT count(*)::bigint FROM pg_catalog.pg_class",
+    )
+    .join("\n");
+    assert!(
+        !catalog_explain.contains("Custom Scan (PgFusionScan)"),
+        "catalog query should bypass pg_fusion planner: {catalog_explain}"
+    );
+
+    let completion_count: i64 = simple_query_first_column_tx(
+        &mut tx,
+        "\
+        SELECT count(*)::bigint
+        FROM pg_catalog.pg_class AS c
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE c.oid = 'pg_catalog.pg_class'::regclass
+          AND pg_catalog.pg_table_is_visible(c.oid)
+        ",
+    )
+    .expect("catalog completion-style query must return one row")
+    .parse()
+    .expect("catalog completion-style query must return a bigint value");
+    assert_eq!(completion_count, 1);
+
+    let settings_completion_explain = simple_query_first_column_rows_tx(
+        &mut tx,
+        "\
+        EXPLAIN
+        SELECT pg_catalog.lower(name)
+        FROM pg_catalog.pg_settings
+        WHERE context IN ('user', 'superuser')
+          AND pg_catalog.lower(name) LIKE pg_catalog.lower('pg\\_fu%')
+        LIMIT 1000
+        ",
+    )
+    .join("\n");
+    assert!(
+        !settings_completion_explain.contains("Custom Scan (PgFusionScan)"),
+        "pg_settings completion query should bypass pg_fusion planner: {settings_completion_explain}"
+    );
+
+    let cte_explain = simple_query_first_column_rows_tx(
+        &mut tx,
+        "\
+        EXPLAIN
+        WITH catalog_rel AS (
+            SELECT oid FROM pg_catalog.pg_class WHERE relname = 'pg_class'
+        )
+        SELECT count(*)::bigint FROM catalog_rel
+        ",
+    )
+    .join("\n");
+    assert!(
+        !cte_explain.contains("Custom Scan (PgFusionScan)"),
+        "catalog relation inside CTE should bypass pg_fusion planner: {cte_explain}"
+    );
+
+    reset_heap_fixture(&mut tx, "pg_fusion_catalog_bypass_user_table");
+    let user_explain = simple_query_first_column_rows_tx(
+        &mut tx,
+        "EXPLAIN SELECT count(*)::bigint FROM pg_fusion_catalog_bypass_user_table",
+    )
+    .join("\n");
+    assert!(
+        user_explain.contains("Custom Scan (PgFusionScan)"),
+        "user table query should still use pg_fusion planner: {user_explain}"
+    );
+}
+
+pub(crate) fn planner_bound_params_bypass_smoke() {
+    let mut client = smoke_client();
+    let mut tx = smoke_transaction(&mut client);
+
+    let row = tx
+        .query_one("SELECT $1::bigint", &[&42_i64])
+        .expect("parameterized query should bypass pg_fusion and execute with vanilla planner");
+    let value: i64 = row.get(0);
+    assert_eq!(value, 42);
+}
+
 fn reset_heap_fixture(tx: &mut Transaction<'_>, table_name: &str) {
     tx.batch_execute(&format!(
         "CREATE TEMP TABLE {table_name} (id bigint NOT NULL, payload text NOT NULL)"
