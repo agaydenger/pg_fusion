@@ -1,5 +1,6 @@
 use control_transport::{AcquireError, BackendSlotLease};
 use postgres::{Client, SimpleQueryMessage, Transaction};
+use std::io::Read;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -99,6 +100,36 @@ fn simple_query_first_column_rows_tx(tx: &mut Transaction<'_>, sql: &str) -> Vec
             _ => None,
         })
         .collect()
+}
+
+fn copy_out_to_string_tx(tx: &mut Transaction<'_>, sql: &str) -> String {
+    let mut reader = tx.copy_out(sql).expect("COPY TO STDOUT must start");
+    let mut output = String::new();
+    reader
+        .read_to_string(&mut output)
+        .expect("COPY TO STDOUT output must be readable");
+    output
+}
+
+fn fusion_scan_metric_summary_tx(tx: &mut Transaction<'_>) -> (i64, i64, i64) {
+    let summary = simple_query_first_column_tx(
+        tx,
+        "\
+        SELECT concat(
+            coalesce(max(value) FILTER (WHERE metric = 'scan_rows_encoded_total'), 0), ',',
+            coalesce(max(value) FILTER (WHERE metric = 'backend_rows_returned_total'), 0), ',',
+            coalesce(max(reset_epoch), 0)
+        )
+        FROM pg_fusion_metrics()
+        ",
+    )
+    .expect("pg_fusion metric summary must return one row");
+    let parts = summary
+        .split(',')
+        .map(|part| part.parse::<i64>().expect("metric value must be integer"))
+        .collect::<Vec<_>>();
+    assert_eq!(parts.len(), 3);
+    (parts[0], parts[1], parts[2])
 }
 
 pub(crate) fn simple_select_smoke() {
@@ -242,6 +273,78 @@ pub(crate) fn planner_bound_params_bypass_smoke() {
         .expect("parameterized query should bypass pg_fusion and execute with vanilla planner");
     let value: i64 = row.get(0);
     assert_eq!(value, 42);
+}
+
+pub(crate) fn copy_select_smoke() {
+    let mut client = smoke_client();
+    let mut tx = smoke_transaction(&mut client);
+    let table_name = "pg_temp.pgf_copy_select_smoke";
+    reset_heap_fixture(&mut tx, table_name);
+
+    let reset_epoch: i64 =
+        simple_query_first_column_tx(&mut tx, "SELECT pg_fusion_metrics_reset()")
+            .expect("metrics reset must return an epoch")
+            .parse()
+            .expect("metrics reset epoch must be an integer");
+
+    let output = copy_out_to_string_tx(
+        &mut tx,
+        &format!(
+            "COPY (
+                SELECT id::bigint, payload
+                FROM {table_name}
+                WHERE id >= 2
+                ORDER BY id
+            ) TO STDOUT WITH (FORMAT csv)"
+        ),
+    );
+    assert_eq!(output, "2,two\n3,three\n");
+
+    let (rows_encoded, rows_returned, metrics_epoch) = fusion_scan_metric_summary_tx(&mut tx);
+    assert!(
+        rows_encoded > 0,
+        "COPY (SELECT ...) should execute through pg_fusion scan path"
+    );
+    assert!(
+        rows_returned > 0,
+        "COPY (SELECT ...) should return rows through pg_fusion custom scan"
+    );
+    assert_eq!(metrics_epoch, reset_epoch);
+}
+
+pub(crate) fn copy_catalog_bypass_smoke() {
+    let mut client = smoke_client();
+    let mut tx = smoke_transaction(&mut client);
+
+    let reset_epoch: i64 =
+        simple_query_first_column_tx(&mut tx, "SELECT pg_fusion_metrics_reset()")
+            .expect("metrics reset must return an epoch")
+            .parse()
+            .expect("metrics reset epoch must be an integer");
+
+    let output = copy_out_to_string_tx(
+        &mut tx,
+        "\
+        COPY (
+            SELECT name
+            FROM pg_catalog.pg_settings
+            WHERE name = 'pg_fusion.enable'
+            ORDER BY name
+        ) TO STDOUT WITH (FORMAT csv)
+        ",
+    );
+    assert_eq!(output, "pg_fusion.enable\n");
+
+    let (rows_encoded, rows_returned, metrics_epoch) = fusion_scan_metric_summary_tx(&mut tx);
+    assert_eq!(
+        rows_encoded, 0,
+        "catalog COPY query should bypass pg_fusion scans"
+    );
+    assert_eq!(
+        rows_returned, 0,
+        "catalog COPY query should bypass pg_fusion custom scan"
+    );
+    assert_eq!(metrics_epoch, reset_epoch);
 }
 
 fn reset_heap_fixture(tx: &mut Transaction<'_>, table_name: &str) {

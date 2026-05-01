@@ -207,7 +207,7 @@ unsafe fn select_sql_from_query(parse: *mut Query, query_string: *const c_char) 
         return sql.to_owned();
     }
 
-    if sql.trim_start().to_ascii_uppercase().starts_with("EXPLAIN") {
+    if should_deparse_planner_query(sql) {
         let deparsed = pgrx::pg_sys::pg_get_querydef(parse, false);
         if !deparsed.is_null() {
             return CStr::from_ptr(deparsed)
@@ -218,6 +218,11 @@ unsafe fn select_sql_from_query(parse: *mut Query, query_string: *const c_char) 
     }
 
     sql.to_owned()
+}
+
+fn should_deparse_planner_query(sql: &str) -> bool {
+    let sql = sql.trim_start().to_ascii_uppercase();
+    sql.starts_with("EXPLAIN") || sql.starts_with("COPY")
 }
 
 struct CustomScanTargetLists {

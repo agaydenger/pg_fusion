@@ -67,6 +67,16 @@ mod tests {
     }
 
     #[pg_test]
+    fn pg_fusion_copy_select_smoke() {
+        super::smoke_tests::copy_select_smoke();
+    }
+
+    #[pg_test]
+    fn pg_fusion_copy_catalog_bypass_smoke() {
+        super::smoke_tests::copy_catalog_bypass_smoke();
+    }
+
+    #[pg_test]
     fn pg_fusion_heap_select_single_row_smoke() {
         super::smoke_tests::heap_select_single_row_smoke();
     }

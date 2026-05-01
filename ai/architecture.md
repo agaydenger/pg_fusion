@@ -58,8 +58,11 @@ page-backed Arrow batches.
    `pg_fusion`: the planner hook bypasses DataFusion planning for queries with
    bind parameters, relations in `pg_catalog`/TOAST namespaces, or
    function/table-function range entries produced by PostgreSQL rewrite, then
-   resolves PostgreSQL catalog metadata for eligible user queries, runs DataFusion
-   logical optimization, then uses `pg_statistics` plus `join_order` to reorder
+   deparses wrapper query strings such as `EXPLAIN` and `COPY (SELECT ...)` back
+   to the inner `Query` text so PostgreSQL can keep native wrapper execution
+   around a pg_fusion custom scan. It then resolves PostgreSQL catalog metadata
+   for eligible user queries, runs DataFusion logical optimization, then uses
+   `pg_statistics` plus `join_order` to reorder
    eligible inner/cross join components before scan lowering. The reorder pass
    estimates each PostgreSQL leaf from the same pushed-down scan SQL that will
    later become a scan descriptor, maps join columns back to PostgreSQL attnums,
