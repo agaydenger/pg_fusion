@@ -38,7 +38,9 @@ pub(crate) static ESTIMATOR_INITIAL_TAIL_BYTES_PER_ROW: GucSetting<i32> =
     GucSetting::<i32>::new(64);
 pub(crate) static SCAN_TIMING_DETAIL: GucSetting<bool> = GucSetting::<bool>::new(false);
 pub(crate) static JOIN_REORDERING: GucSetting<bool> = GucSetting::<bool>::new(true);
-pub(crate) static RUNTIME_FILTER_ENABLE: GucSetting<bool> = GucSetting::<bool>::new(false);
+const DEFAULT_RUNTIME_FILTER_ENABLE: bool = true;
+pub(crate) static RUNTIME_FILTER_ENABLE: GucSetting<bool> =
+    GucSetting::<bool>::new(DEFAULT_RUNTIME_FILTER_ENABLE);
 pub(crate) static RUNTIME_FILTER_COUNT: GucSetting<i32> = GucSetting::<i32>::new(64);
 pub(crate) static RUNTIME_FILTER_BITS: GucSetting<i32> = GucSetting::<i32>::new(1_048_576);
 pub(crate) static RUNTIME_FILTER_HASHES: GucSetting<i32> = GucSetting::<i32>::new(4);
@@ -471,6 +473,11 @@ fn positive_usize(name: &'static str, actual: i32) -> Result<usize, HostConfigEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_filter_defaults_to_enabled() {
+        assert!(DEFAULT_RUNTIME_FILTER_ENABLE);
+    }
 
     #[test]
     fn backend_service_config_uses_new_guc_surface() {

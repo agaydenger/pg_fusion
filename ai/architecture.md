@@ -71,9 +71,9 @@ page-backed Arrow batches.
    reuses the owned batches. PostgreSQL text-like columns are represented as
    Arrow `Utf8View` in the DataFusion logical schema so scan pages can stay
    zero-copy for string payloads.
-2. Worker physical planning can attach runtime Bloom filters to eligible
-   `HashJoinExec` nodes when `pg_fusion.runtime_filter_enable` is set. The v1
-   path is intentionally narrow: one `Inner` hash join equi-key, `Column =
+2. Worker physical planning attaches runtime Bloom filters to eligible
+   `HashJoinExec` nodes unless `pg_fusion.runtime_filter_enable` is disabled.
+   The v1 path is intentionally narrow: one `Inner` hash join equi-key, `Column =
    Column`, single-partition build side, supported key type (`bool`,
    `int2`/`int4`/`int8`, `float4`/`float8`, or text-like `Utf8View` from
    `text`/`varchar`/`bpchar`/`name`), and a `WorkerPgScanExec` on the probe

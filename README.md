@@ -133,7 +133,7 @@ pg_fusion.estimator_initial_tail_bytes_per_row = 64
 # Logical planning.
 pg_fusion.join_reordering = on
 
-# Runtime Bloom filters (disabled by default).
+# Runtime Bloom filters (enabled by default).
 pg_fusion.runtime_filter_count = 64
 pg_fusion.runtime_filter_bits = 1048576
 pg_fusion.runtime_filter_hashes = 4
@@ -155,10 +155,10 @@ query starts and sends them to the worker in `StartExecution`; changing them
 mid-query does not affect already-open scan streams.
 
 `pg_fusion.runtime_filter_enable` is also a `Userset` GUC and defaults to
-`off`. The pool sizing knobs shown above are `Postmaster` GUCs because they
-define shared-memory layout. When enabled, worker physical planning can build
-Bloom filters for narrow integer-key inner hash joins and backend scan
-producers apply ready filters before slot-to-Arrow encoding.
+`on`. The pool sizing knobs shown above are `Postmaster` GUCs because they
+define shared-memory layout. By default, worker physical planning can build
+Bloom filters for eligible inner hash joins and backend scan producers apply
+ready filters before slot-to-Arrow encoding.
 
 After configuring the pgrx cluster, install the extension and open `psql`:
 
@@ -253,17 +253,17 @@ testing or to isolate planning issues:
 SET pg_fusion.join_reordering = off;
 ```
 
-Enable runtime filters for targeted experiments:
+Disable runtime filters for A/B testing or to isolate filter behavior:
 
 ```sql
-SET pg_fusion.runtime_filter_enable = on;
+SET pg_fusion.runtime_filter_enable = off;
 ```
 
 The first implementation supports only simple `Column = Column` inner hash
-joins with a single-partition build side, `int2`, `int4`, or `int8` keys, and a
-PostgreSQL scan on the probe side. If no slot is available in the shared filter
-pool, the query continues without that filter and increments
-`runtime_filter_pool_exhausted_total`.
+joins with a single-partition build side, supported bool, integer, float, or
+text-like keys, and a PostgreSQL scan on the probe side. If no slot is
+available in the shared filter pool, the query continues without that filter
+and increments `runtime_filter_pool_exhausted_total`.
 
 `pg_fusion.scan_fetch_batch_rows` controls how many rows the backend asks
 PostgreSQL to deliver from the scan portal per direct `PortalRunFetch()` call.

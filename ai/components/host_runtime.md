@@ -38,7 +38,7 @@ importance: 0.8
   `pg_fusion.scan_idle_poll_interval_us` at query start and passes them to the
   worker through `StartExecution`.
 - Runtime Bloom filters are controlled by `pg_fusion.runtime_filter_enable`
-  (default `off`) plus postmaster-sized pool settings
+  (default `on`) plus postmaster-sized pool settings
   `pg_fusion.runtime_filter_count`, `pg_fusion.runtime_filter_bits`, and
   `pg_fusion.runtime_filter_hashes`. Worker physical planning allocates filters
   from a shared-memory pool and records `(session_epoch, scan_id,
