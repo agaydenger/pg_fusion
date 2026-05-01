@@ -106,11 +106,21 @@ for probe in &probes {
 
 ## Hashing contract
 
-The Bloom filter stores already-hashed keys. `hash_int_key` is the current
-`pg_fusion` integer-key helper and intentionally keeps the build/probe contract
-simple: both sides must call the same helper for the same logical key type.
-Future non-integer keys should add explicit helpers instead of relying on
-ad-hoc byte encodings at call sites.
+The Bloom filter stores already-hashed keys. `pg_fusion` currently exposes
+helpers for supported runtime-filter key families:
+
+- `hash_bool_key` for `bool`
+- `hash_int_key` for `int2` / `int4` / `int8`
+- `hash_float32_key` for `float4`
+- `hash_float64_key` for `float8`
+- `hash_bytes_key` for text-like `Utf8View` keys (`text`, `varchar`,
+  `bpchar`, and `name` in the extension scan schema)
+
+Both build and probe sides must call the same helper for the same logical key
+type. Float helpers normalize signed zero and NaNs so the two sides agree on
+logical equality-sensitive bit patterns. Text-like keys are hashed as their
+encoded UTF-8 bytes; callers must not invent ad-hoc byte encodings at call
+sites.
 
 ## Correctness rules
 

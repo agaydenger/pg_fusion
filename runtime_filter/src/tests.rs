@@ -422,6 +422,28 @@ fn statistical_false_positive_rate_stays_reasonable() {
 }
 
 #[test]
+fn hash_helpers_normalize_supported_key_types() {
+    assert_ne!(hash_bool_key(false), hash_bool_key(true));
+
+    assert_eq!(hash_float32_key(0.0), hash_float32_key(-0.0));
+    assert_eq!(
+        hash_float32_key(f32::from_bits(0x7fc0_0001)),
+        hash_float32_key(f32::from_bits(0x7fc0_0002)),
+    );
+    assert_ne!(hash_float32_key(1.0), hash_float32_key(2.0));
+
+    assert_eq!(hash_float64_key(0.0), hash_float64_key(-0.0));
+    assert_eq!(
+        hash_float64_key(f64::from_bits(0x7ff8_0000_0000_0001)),
+        hash_float64_key(f64::from_bits(0x7ff8_0000_0000_0002)),
+    );
+    assert_ne!(hash_float64_key(1.0), hash_float64_key(2.0));
+
+    assert_eq!(hash_bytes_key(b"alpha"), hash_bytes_key(b"alpha"));
+    assert_ne!(hash_bytes_key(b"alpha"), hash_bytes_key(b"beta"));
+}
+
+#[test]
 fn layout_places_bits_after_header_with_atomic_alignment() {
     let params = BloomParams::new(256, 4, 0).unwrap();
     let layout = runtime_filter_layout(params).unwrap();

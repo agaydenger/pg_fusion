@@ -87,6 +87,9 @@ caller creates a fresh block whenever `AppendStatus::Full` is returned.
   attributes.
 - `append_slot(slot)` accepts undeformed or partially deformed slots and asks
   PostgreSQL to deform enough attributes when needed.
+- `with_filter_key(slot, source_index, key_type, callback)` reads one supported
+  runtime-filter key from a deformed slot without staging text-like values on
+  the Rust heap. Borrowed text bytes are valid only inside the callback.
 - `finish()` writes final header state back into the block and returns
   `EncodedBatch { row_count, payload_len }`.
 

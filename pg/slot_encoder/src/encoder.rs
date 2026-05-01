@@ -18,6 +18,28 @@ pub enum SlotIntKeyType {
     Int64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotFilterKeyType {
+    Boolean,
+    Int16,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
+    Utf8View,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SlotFilterKeyRef<'a> {
+    Boolean(bool),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
+    Utf8(&'a [u8]),
+}
+
 /// Direct writer from PostgreSQL `TupleTableSlot` rows into an
 /// `arrow_layout` block.
 ///
@@ -326,6 +348,28 @@ pub unsafe fn read_int_key(
     source_index: usize,
     key_type: SlotIntKeyType,
 ) -> Result<Option<i64>, EncodeError> {
+    let filter_key_type = match key_type {
+        SlotIntKeyType::Int16 => SlotFilterKeyType::Int16,
+        SlotIntKeyType::Int32 => SlotFilterKeyType::Int32,
+        SlotIntKeyType::Int64 => SlotFilterKeyType::Int64,
+    };
+    unsafe {
+        with_filter_key(slot, source_index, filter_key_type, |value| match value {
+            Some(SlotFilterKeyRef::Int16(value)) => Some(value as i64),
+            Some(SlotFilterKeyRef::Int32(value)) => Some(value as i64),
+            Some(SlotFilterKeyRef::Int64(value)) => Some(value),
+            None => None,
+            _ => unreachable!("integer filter key type must return integer key"),
+        })
+    }
+}
+
+pub unsafe fn with_filter_key<R>(
+    slot: *mut pg_sys::TupleTableSlot,
+    source_index: usize,
+    key_type: SlotFilterKeyType,
+    f: impl FnOnce(Option<SlotFilterKeyRef<'_>>) -> R,
+) -> Result<R, EncodeError> {
     if slot.is_null() {
         return Err(EncodeError::NullSlot);
     }
@@ -347,29 +391,62 @@ pub unsafe fn read_int_key(
     }
 
     if unsafe { *isnulls.add(source_index) } {
-        return Ok(None);
+        return Ok(f(None));
     }
 
     let attrs_ptr = unsafe { (*tuple_desc).attrs.as_mut_ptr() };
     let attr = unsafe { &*attrs_ptr.add(source_index) };
     let datum = unsafe { *values.add(source_index) };
-    let value = match key_type {
-        SlotIntKeyType::Int16 if attr.atttypid == pg_sys::INT2OID => unsafe {
-            read_i16(datum, attr.attbyval) as i64
-        },
-        SlotIntKeyType::Int32 if attr.atttypid == pg_sys::INT4OID => unsafe {
-            read_i32(datum, attr.attbyval) as i64
-        },
-        SlotIntKeyType::Int64 if attr.atttypid == pg_sys::INT8OID => unsafe {
-            read_i64(datum, attr.attbyval)
-        },
-        _ => {
-            return Err(EncodeError::UnsupportedRowAccess {
-                index: source_index,
+    match key_type {
+        SlotFilterKeyType::Boolean if attr.atttypid == pg_sys::BOOLOID => {
+            Ok(f(Some(SlotFilterKeyRef::Boolean(unsafe {
+                read_bool(datum, attr.attbyval)
+            }))))
+        }
+        SlotFilterKeyType::Int16 if attr.atttypid == pg_sys::INT2OID => {
+            Ok(f(Some(SlotFilterKeyRef::Int16(unsafe {
+                read_i16(datum, attr.attbyval)
+            }))))
+        }
+        SlotFilterKeyType::Int32 if attr.atttypid == pg_sys::INT4OID => {
+            Ok(f(Some(SlotFilterKeyRef::Int32(unsafe {
+                read_i32(datum, attr.attbyval)
+            }))))
+        }
+        SlotFilterKeyType::Int64 if attr.atttypid == pg_sys::INT8OID => {
+            Ok(f(Some(SlotFilterKeyRef::Int64(unsafe {
+                read_i64(datum, attr.attbyval)
+            }))))
+        }
+        SlotFilterKeyType::Float32 if attr.atttypid == pg_sys::FLOAT4OID => {
+            Ok(f(Some(SlotFilterKeyRef::Float32(unsafe {
+                read_f32(datum, attr.attbyval)
+            }))))
+        }
+        SlotFilterKeyType::Float64 if attr.atttypid == pg_sys::FLOAT8OID => {
+            Ok(f(Some(SlotFilterKeyRef::Float64(unsafe {
+                read_f64(datum, attr.attbyval)
+            }))))
+        }
+        SlotFilterKeyType::Utf8View if attr.atttypid == pg_sys::NAMEOID => {
+            let bytes = unsafe { read_name_bytes(datum, source_index)? };
+            Ok(f(Some(SlotFilterKeyRef::Utf8(bytes))))
+        }
+        SlotFilterKeyType::Utf8View if pg_oid_needs_detoast(attr.atttypid) => {
+            if attr.atttypid == pg_sys::BYTEAOID {
+                return Err(EncodeError::UnsupportedRowAccess {
+                    index: source_index,
+                });
+            }
+            with_detoasted_slot_datum(datum, source_index, |detoasted| {
+                let bytes = unsafe { read_packed_varlena(detoasted, source_index)? };
+                Ok(f(Some(SlotFilterKeyRef::Utf8(bytes))))
             })
         }
-    };
-    Ok(Some(value))
+        _ => Err(EncodeError::UnsupportedRowAccess {
+            index: source_index,
+        }),
+    }
 }
 
 struct PgSlotRow {

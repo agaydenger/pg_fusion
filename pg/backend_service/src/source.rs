@@ -4,12 +4,14 @@ use arrow_schema::SchemaRef;
 use pgrx::pg_sys;
 use row_estimator::PageRowEstimator;
 use runtime_filter::{
-    hash_int_key, ProbeDecision, RuntimeFilterKeyType, RuntimeFilterPool, RuntimeFilterProbeHandle,
+    hash_bool_key, hash_bytes_key, hash_float32_key, hash_float64_key, hash_int_key, ProbeDecision,
+    RuntimeFilterKeyType, RuntimeFilterPool, RuntimeFilterProbeHandle,
 };
 use runtime_metrics::{MetricId, RuntimeMetrics};
 use scan_flow::{BackendPageSource, FlowId, SourcePageStatus};
 use slot_encoder::{
-    ensure_slot_deformed, read_int_key, AppendStatus, PageBatchEncoder, SlotIntKeyType,
+    ensure_slot_deformed, with_filter_key, AppendStatus, PageBatchEncoder, SlotFilterKeyRef,
+    SlotFilterKeyType,
 };
 use slot_scan::{ExecutionSpiContext, PreparedScan, SlotSinkAction, StreamingScanSession};
 
@@ -511,11 +513,17 @@ fn runtime_filter_rejects_slot(
                 "runtime filter target output column {output_column} is outside scan projection"
             )));
         };
-        let decision =
-            match unsafe { read_int_key(slot, source_column, slot_key_type(probe.key_type())) }? {
-                Some(value) => probe.decision_for_hash(hash_int_key(value)),
-                None => probe.decision_for_null(),
-            };
+        let decision = unsafe {
+            with_filter_key(
+                slot,
+                source_column,
+                slot_filter_key_type(probe.key_type()),
+                |value| match value {
+                    Some(value) => probe.decision_for_hash(hash_slot_filter_key(value)),
+                    None => probe.decision_for_null(),
+                },
+            )
+        }?;
         match decision {
             ProbeDecision::PassUnfiltered => {
                 stats.pass_unfiltered = stats.pass_unfiltered.saturating_add(1);
@@ -530,11 +538,27 @@ fn runtime_filter_rejects_slot(
     Ok(false)
 }
 
-fn slot_key_type(key_type: RuntimeFilterKeyType) -> SlotIntKeyType {
+fn slot_filter_key_type(key_type: RuntimeFilterKeyType) -> SlotFilterKeyType {
     match key_type {
-        RuntimeFilterKeyType::Int16 => SlotIntKeyType::Int16,
-        RuntimeFilterKeyType::Int32 => SlotIntKeyType::Int32,
-        RuntimeFilterKeyType::Int64 => SlotIntKeyType::Int64,
+        RuntimeFilterKeyType::Boolean => SlotFilterKeyType::Boolean,
+        RuntimeFilterKeyType::Int16 => SlotFilterKeyType::Int16,
+        RuntimeFilterKeyType::Int32 => SlotFilterKeyType::Int32,
+        RuntimeFilterKeyType::Int64 => SlotFilterKeyType::Int64,
+        RuntimeFilterKeyType::Float32 => SlotFilterKeyType::Float32,
+        RuntimeFilterKeyType::Float64 => SlotFilterKeyType::Float64,
+        RuntimeFilterKeyType::Utf8View => SlotFilterKeyType::Utf8View,
+    }
+}
+
+fn hash_slot_filter_key(value: SlotFilterKeyRef<'_>) -> u64 {
+    match value {
+        SlotFilterKeyRef::Boolean(value) => hash_bool_key(value),
+        SlotFilterKeyRef::Int16(value) => hash_int_key(value as i64),
+        SlotFilterKeyRef::Int32(value) => hash_int_key(value as i64),
+        SlotFilterKeyRef::Int64(value) => hash_int_key(value),
+        SlotFilterKeyRef::Float32(value) => hash_float32_key(value),
+        SlotFilterKeyRef::Float64(value) => hash_float64_key(value),
+        SlotFilterKeyRef::Utf8(value) => hash_bytes_key(value),
     }
 }
 

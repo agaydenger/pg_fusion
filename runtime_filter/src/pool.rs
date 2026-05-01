@@ -27,6 +27,14 @@ pub enum RuntimeFilterKeyType {
     Int32 = 2,
     /// Signed 64-bit integer key.
     Int64 = 3,
+    /// Boolean key.
+    Boolean = 4,
+    /// 32-bit floating-point key.
+    Float32 = 5,
+    /// 64-bit floating-point key.
+    Float64 = 6,
+    /// UTF-8 byte key.
+    Utf8View = 7,
 }
 
 impl RuntimeFilterKeyType {
@@ -35,6 +43,10 @@ impl RuntimeFilterKeyType {
             1 => Some(Self::Int16),
             2 => Some(Self::Int32),
             3 => Some(Self::Int64),
+            4 => Some(Self::Boolean),
+            5 => Some(Self::Float32),
+            6 => Some(Self::Float64),
+            7 => Some(Self::Utf8View),
             _ => None,
         }
     }

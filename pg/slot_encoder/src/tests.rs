@@ -1,4 +1,7 @@
-use super::{set_test_database_encoding, AppendStatus, ConfigError, EncodeError, PageBatchEncoder};
+use super::{
+    set_test_database_encoding, with_filter_key, AppendStatus, ConfigError, EncodeError,
+    PageBatchEncoder, SlotFilterKeyRef, SlotFilterKeyType,
+};
 use arrow_layout::{init_block, BlockRef, ColumnSpec, LayoutPlan, TypeTag};
 use pgrx_pg_sys as pg_sys;
 use std::alloc::{alloc_zeroed, dealloc, GlobalAlloc, Layout, System};
@@ -195,6 +198,7 @@ enum MockCell {
     Null,
     Bool(bool),
     I32(i32),
+    F32(f32),
     F64(f64),
     Utf8(Vec<u8>),
     Binary(Vec<u8>),
@@ -208,6 +212,7 @@ impl MockCell {
             Self::Null => (pg_sys::Datum::null(), true),
             Self::Bool(value) => (pg_sys::Datum::from(*value), false),
             Self::I32(value) => (pg_sys::Datum::from(*value), false),
+            Self::F32(value) => (pg_sys::Datum::from(value.to_bits()), false),
             Self::F64(value) => (pg_sys::Datum::from(value.to_bits()), false),
             Self::Utf8(value) | Self::Binary(value) => {
                 (pg_sys::Datum::from(value.as_mut_ptr()), false)
@@ -581,6 +586,173 @@ fn append_slot_reads_fixed_width_and_name_values() {
     assert!(bool_at(&block, 0, 0));
     assert_eq!(i32_at(&block, 1, 0), 42);
     assert_eq!(view_bytes(&block, 2, 0).as_deref(), Some(&b"slot_name"[..]));
+}
+
+#[test]
+fn with_filter_key_reads_supported_runtime_filter_keys() {
+    let _encoding = EncodingGuard::utf8();
+    let attrs = [
+        TestAttr {
+            oid: pg_sys::BOOLOID,
+            attlen: 1,
+            attbyval: true,
+            attalign: b'c',
+        },
+        TestAttr {
+            oid: pg_sys::FLOAT4OID,
+            attlen: 4,
+            attbyval: true,
+            attalign: b'i',
+        },
+        TestAttr {
+            oid: pg_sys::FLOAT8OID,
+            attlen: 8,
+            attbyval: true,
+            attalign: b'd',
+        },
+        TestAttr {
+            oid: pg_sys::TEXTOID,
+            attlen: -1,
+            attbyval: false,
+            attalign: b'i',
+        },
+        TestAttr {
+            oid: pg_sys::VARCHAROID,
+            attlen: -1,
+            attbyval: false,
+            attalign: b'i',
+        },
+        TestAttr {
+            oid: pg_sys::BPCHAROID,
+            attlen: -1,
+            attbyval: false,
+            attalign: b'i',
+        },
+        TestAttr {
+            oid: pg_sys::NAMEOID,
+            attlen: 64,
+            attbyval: false,
+            attalign: b'c',
+        },
+    ];
+    let tuple_desc = OwnedTupleDesc::new(&attrs);
+    let mut slot = OwnedSlot::from_cells(
+        tuple_desc.ptr,
+        vec![
+            MockCell::Bool(true),
+            MockCell::F32(1.25),
+            MockCell::F64(-2.5),
+            MockCell::Utf8(short_varlena(b"text")),
+            MockCell::Utf8(short_varlena(b"varchar")),
+            MockCell::Utf8(short_varlena(b"bpchar")),
+            MockCell::Name(name_data("name_key")),
+        ],
+    );
+
+    let bool_key = unsafe {
+        with_filter_key(
+            slot.as_mut_ptr(),
+            0,
+            SlotFilterKeyType::Boolean,
+            |value| match value {
+                Some(SlotFilterKeyRef::Boolean(value)) => Some(value),
+                other => panic!("unexpected bool key: {other:?}"),
+            },
+        )
+    }
+    .expect("bool key");
+    assert_eq!(bool_key, Some(true));
+
+    let float4_key = unsafe {
+        with_filter_key(
+            slot.as_mut_ptr(),
+            1,
+            SlotFilterKeyType::Float32,
+            |value| match value {
+                Some(SlotFilterKeyRef::Float32(value)) => Some(value),
+                other => panic!("unexpected float4 key: {other:?}"),
+            },
+        )
+    }
+    .expect("float4 key");
+    assert_eq!(float4_key, Some(1.25));
+
+    let float8_key = unsafe {
+        with_filter_key(
+            slot.as_mut_ptr(),
+            2,
+            SlotFilterKeyType::Float64,
+            |value| match value {
+                Some(SlotFilterKeyRef::Float64(value)) => Some(value),
+                other => panic!("unexpected float8 key: {other:?}"),
+            },
+        )
+    }
+    .expect("float8 key");
+    assert_eq!(float8_key, Some(-2.5));
+
+    for (index, expected) in [
+        (3, &b"text"[..]),
+        (4, &b"varchar"[..]),
+        (5, &b"bpchar"[..]),
+        (6, &b"name_key"[..]),
+    ] {
+        let key = unsafe {
+            with_filter_key(
+                slot.as_mut_ptr(),
+                index,
+                SlotFilterKeyType::Utf8View,
+                |value| match value {
+                    Some(SlotFilterKeyRef::Utf8(bytes)) => Some(bytes.to_vec()),
+                    other => panic!("unexpected key at {index}: {other:?}"),
+                },
+            )
+        }
+        .expect("utf8 key");
+        assert_eq!(key.as_deref(), Some(expected));
+    }
+}
+
+#[test]
+fn with_filter_key_rejects_type_mismatches_and_binary_text_keys() {
+    let attrs = [
+        TestAttr {
+            oid: pg_sys::INT4OID,
+            attlen: 4,
+            attbyval: true,
+            attalign: b'i',
+        },
+        TestAttr {
+            oid: pg_sys::BYTEAOID,
+            attlen: -1,
+            attbyval: false,
+            attalign: b'i',
+        },
+    ];
+    let tuple_desc = OwnedTupleDesc::new(&attrs);
+    let mut slot = OwnedSlot::from_cells(
+        tuple_desc.ptr,
+        vec![
+            MockCell::I32(42),
+            MockCell::Binary(short_varlena(b"not text")),
+        ],
+    );
+
+    let error =
+        unsafe { with_filter_key(slot.as_mut_ptr(), 0, SlotFilterKeyType::Boolean, |_| ()) }
+            .expect_err("boolean over int4 must fail");
+    assert!(matches!(
+        error,
+        EncodeError::UnsupportedRowAccess { index: 0 }
+    ));
+
+    let error =
+        unsafe { with_filter_key(slot.as_mut_ptr(), 1, SlotFilterKeyType::Utf8View, |_| ()) }
+            .expect_err("bytea must not be a text runtime filter key");
+    assert!(matches!(
+        error,
+        EncodeError::UnsupportedRowAccess { index: 1 }
+    ));
 }
 
 #[test]

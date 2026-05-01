@@ -44,9 +44,10 @@ importance: 0.8
   from a shared-memory pool and records `(session_epoch, scan_id,
   output_column, key_type)` metadata there. Backend scan producers, including
   dynamic standalone scan workers, attach probes by `(session_epoch, scan_id)`
-  at scan open and test integer keys before Arrow encoding. No control-ring
-  message is needed for readiness; probes read the shared lifecycle word and
-  pass rows unfiltered until the matching generation is `Ready`.
+  at scan open and test supported bool, integer, float, and text-like keys
+  before Arrow encoding. No control-ring message is needed for readiness;
+  probes read the shared lifecycle word and pass rows unfiltered until the
+  matching generation is `Ready`.
 - Results return as issued Arrow pages and are projected into PostgreSQL tuple
   slots through `pg/slot_import`.
 - The issuance permit pool is sized from `pg_fusion.page_count`; there is no
