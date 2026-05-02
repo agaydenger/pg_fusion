@@ -3,7 +3,7 @@ id: comp-host-runtime-0001
 type: fact
 scope: host_runtime
 tags: ["pgrx", "datafusion", "shared-memory", "runtime_protocol", "slot_scan"]
-updated_at: "2026-04-29"
+updated_at: "2026-05-02"
 importance: 0.8
 ---
 
@@ -29,6 +29,13 @@ importance: 0.8
   workers. Dynamic worker capacity failures clean up partial launches and
   continue leader-only for the current and remaining scans; readiness/protocol
   failures still fail the query.
+- The primary worker owns a current-thread Tokio runtime for DataFusion
+  physical planning and result-stream execution. Root physical plans are driven
+  through DataFusion `execute_stream`, so multi-partition roots such as `UNION`
+  are collected by DataFusion rather than by manually executing only partition
+  `0`. PostgreSQL scan producers remain ordinary backend/scan-worker threads:
+  they communicate through shared-memory scan transport and never call
+  PostgreSQL APIs from Tokio tasks.
 - Worker execution lives in `worker_runtime` and consumes scan pages as Arrow
   batches through `page/import`. Transport scan streams use a bounded
   DataFusion batch channel and short idle polling interval so scan threads can

@@ -3,7 +3,7 @@ id: gotchas-0001
 type: gotcha
 scope: repo
 tags: ["shm", "pgrx", "slot_scan", "arrow", "testing"]
-updated_at: "2026-05-01"
+updated_at: "2026-05-02"
 importance: 0.7
 ---
 
@@ -62,6 +62,10 @@ importance: 0.7
   optimization. Subqueries that decorrelate into ordinary relational operators
   can lower PostgreSQL leaf scans; subquery nodes that survive optimization
   remain unsupported.
+- The primary worker must drive final physical-plan output with DataFusion
+  `execute_stream` inside its Tokio runtime. Calling `ExecutionPlan::execute(0,
+  ...)` directly only drains partition `0` and breaks multi-partition roots
+  such as `UNION`.
 - DataFusion clones ordinary CTE plans at each reference. `plan_builder`
   rewrites non-recursive multi-use CTEs before SQL planning so references become
   `PgCteRefNode` reads over one materialized producer. Keep this path for

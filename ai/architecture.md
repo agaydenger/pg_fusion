@@ -3,7 +3,7 @@ id: arch-overview-0001
 type: fact
 scope: repo
 tags: ["architecture", "datafusion", "pgrx", "shared-memory", "ipc", "slot_scan", "statistics"]
-updated_at: "2026-04-29"
+updated_at: "2026-05-02"
 importance: 0.8
 ---
 
@@ -102,7 +102,10 @@ page-backed Arrow batches.
    each producer owns a dedicated scan control slot and writes its own Arrow
    pages into shared memory.
 5. Worker imports scan pages as Arrow `RecordBatch` values, runs DataFusion
-   operators, writes Arrow result pages, and sends issued frames back.
+   operators under its current-thread Tokio runtime, writes Arrow result pages,
+   and sends issued frames back. Scan production remains on PostgreSQL
+   backend/scan-worker threads; Tokio only drives DataFusion planning,
+   multi-partition root collection, and result-stream polling.
 6. Backend imports result pages with `slot_import` and projects rows into
    PostgreSQL tuple slots.
 

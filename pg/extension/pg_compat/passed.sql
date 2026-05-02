@@ -2946,6 +2946,11 @@ SELECT i,SUM(v::int) OVER (ORDER BY i ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING)
 SELECT i,SUM(v::int) OVER (ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)
   FROM (VALUES(1,1),(2,2),(3,3),(4,4)) t(i,v);
 
+-- id: union_1_select_1_as_two_union_select_2_order_by_1_2a01e8b5
+-- origin: postgres REL_17_STABLE src/test/regress/sql/union.sql:1
+-- compare: ordered
+SELECT 1 AS two UNION SELECT 2 ORDER BY 1;
+
 -- id: with_32_with_q1_x_y_as_select_hundred_sum_ten_from_tenk1_group_by_hundred_select_056e623e
 -- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:230
 -- compare: multiset
@@ -2958,4 +2963,3 @@ SELECT count(*) FROM q1 WHERE y > (SELECT sum(y)/100 FROM q1 qsub);
 -- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:1073
 -- compare: multiset
 with cte(foo) as ( select 42 ) select * from ((select foo from cte)) q;
-

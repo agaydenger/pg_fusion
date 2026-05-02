@@ -8089,12 +8089,6 @@ SELECT q1, case when q1 > 0 then generate_series(1,3) else 0 end FROM int8_tbl;
 -- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(E0A000), message: "set-returning functions are not allowed in COALESCE", detail: None, hint: Some("You might be able to move the set-returning function into a LATERAL FROM item."), position: Some(Original(29)), where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("parse_expr.c"), line: Some(2256), routine: Some("transformCoalesceExpr") }) }
 SELECT q1, coalesce(generate_series(1,3), 0) FROM int8_tbl;
 
--- id: union_1_select_1_as_two_union_select_2_order_by_1_2a01e8b5
--- origin: postgres REL_17_STABLE src/test/regress/sql/union.sql:1
--- compare: ordered
--- reason: query failed with pg_fusion.enable=on: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(E57014), message: "canceling statement due to statement timeout", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("postgres.c"), line: Some(3407), routine: Some("ProcessInterrupts") }) }
-SELECT 1 AS two UNION SELECT 2 ORDER BY 1;
-
 -- id: varchar_20_select_pg_input_is_valid_abcd_varchar_4_b1c5551c
 -- origin: postgres REL_17_STABLE src/test/regress/sql/varchar.sql:68
 -- compare: multiset
@@ -12017,4 +12011,3 @@ select * from with_test;
 -- reason: query failed with pg_fusion.enable=on: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(E42P07), message: "relation \"parallel_write\" already exists", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("createas.c"), line: Some(402), routine: Some("CreateTableAsRelExists") }) }
 select length(stringu1) into parallel_write
     from tenk1 group by length(stringu1);
-

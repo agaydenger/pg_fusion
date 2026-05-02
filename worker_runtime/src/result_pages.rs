@@ -116,6 +116,15 @@ impl ResultPageProducer {
     /// Returns `Ok(None)` only after the stream close frame has already been
     /// emitted and the producer is fully exhausted.
     pub fn next_step(&mut self) -> Result<Option<ResultPageStep>, WorkerRuntimeError> {
+        futures::executor::block_on(self.next_step_async())
+    }
+
+    /// Async variant of [`Self::next_step`].
+    ///
+    /// Worker execution should use this while running inside the DataFusion
+    /// Tokio runtime so multi-partition physical operators can drive their
+    /// spawned input tasks.
+    pub async fn next_step_async(&mut self) -> Result<Option<ResultPageStep>, WorkerRuntimeError> {
         loop {
             if let Some(batch) = self.pending_batch.as_ref() {
                 if self.pending_row < batch.num_rows() {
@@ -135,7 +144,7 @@ impl ResultPageProducer {
                 return Ok(Some(ResultPageStep::CloseFrame(self.tx.close()?)));
             }
 
-            match futures::executor::block_on(self.stream.next()) {
+            match self.stream.next().await {
                 Some(Ok(batch)) if batch.num_rows() == 0 => continue,
                 Some(Ok(batch)) => {
                     self.pending_batch = Some(batch);

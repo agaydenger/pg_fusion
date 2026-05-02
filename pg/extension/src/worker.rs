@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use backend_service::{BackendService, StandaloneScanProducerInput};
-use control_transport::BackendSlotLease;
 use control_transport::WorkerTransport;
+use control_transport::{BackendLeaseSlot, BackendSlotLease};
+use datafusion::physical_plan::{execute_stream, ExecutionPlan};
 use datafusion_execution::TaskContext;
-use futures::executor::block_on;
 use issuance::{encode_issued_frame, IssuancePool, IssuedRx, IssuedTx};
 use pgrx::bgworkers::{BackgroundWorker, BackgroundWorkerBuilder, SignalWakeFlags};
 use pgrx::prelude::*;
@@ -178,6 +178,7 @@ fn run_worker_main() -> Result<(), WorkerRuntimeError> {
     )?);
     let mut runtime = WorkerRuntimeCore::new(worker_config, scan_source);
     let mut plan_rx: Option<IssuedRx> = None;
+    let df_runtime = build_datafusion_runtime()?;
     debug!(component = "worker", "worker entering main poll loop");
 
     while BackgroundWorker::wait_latch(Some(POLL_INTERVAL)) {
@@ -220,6 +221,7 @@ fn run_worker_main() -> Result<(), WorkerRuntimeError> {
             handle_steps(
                 &mut transport,
                 &mut runtime,
+                &df_runtime,
                 &config,
                 page_pool,
                 issuance_pool,
@@ -239,6 +241,7 @@ fn run_worker_main() -> Result<(), WorkerRuntimeError> {
 fn handle_steps(
     transport: &mut TransportWorkerRuntime,
     runtime: &mut WorkerRuntimeCore,
+    df_runtime: &tokio::runtime::Runtime,
     config: &crate::HostConfig,
     page_pool: PagePool,
     issuance_pool: IssuancePool,
@@ -271,7 +274,7 @@ fn handle_steps(
                     "worker starting physical planning"
                 );
                 let plan_start = metrics.now_ns();
-                let result = block_on(pending.plan());
+                let result = df_runtime.block_on(pending.plan());
                 metrics.add_elapsed(MetricId::WorkerPhysicalPlanNs, plan_start);
                 metrics.increment(MetricId::WorkerPhysicalPlanTotal);
                 steps.push_back(runtime.finish_physical_planning(peer, flow, result)?);
@@ -285,78 +288,21 @@ fn handle_steps(
                     peer = ?peer,
                     "worker received physical plan and is starting execution"
                 );
-                let execution_result: Result<(), WorkerRuntimeError> = (|| {
-                    let plan = runtime
-                        .take_physical_plan()
-                        .ok_or(WorkerRuntimeError::MissingPhysicalPlan)?;
-                    let stream = plan.execute(0, Arc::new(TaskContext::default()))?;
-                    let page_tx = PageTx::new(page_pool);
-                    let payload_capacity =
-                        u32::try_from(page_tx.payload_capacity()).map_err(|_| {
-                            WorkerRuntimeError::ProtocolViolation(
-                                "result payload capacity exceeds u32".into(),
-                            )
-                        })?;
-                    let mut producer = ResultPageProducer::new(
-                        stream,
-                        IssuedTx::new(page_tx, issuance_pool),
-                        payload_capacity,
-                        ResultPageProducerConfig {
-                            estimator: row_estimator::EstimatorConfig {
-                                initial_tail_bytes_per_row: config
-                                    .estimator_initial_tail_bytes_per_row,
-                            },
+                let execution_result: Result<(), WorkerRuntimeError> = runtime
+                    .take_physical_plan()
+                    .ok_or(WorkerRuntimeError::MissingPhysicalPlan)
+                    .and_then(|plan| {
+                        df_runtime.block_on(execute_physical_plan(
+                            transport,
+                            config,
+                            page_pool,
+                            issuance_pool,
                             metrics,
-                            ..ResultPageProducerConfig::default()
-                        },
-                    )?;
-                    loop {
-                        match producer.next_step()? {
-                            Some(ResultPageStep::OutboundPage(outbound)) => {
-                                trace!(
-                                    component = "worker",
-                                    session_epoch = result.session_epoch,
-                                    peer = ?peer,
-                                    "worker produced one result page"
-                                );
-                                let descriptor = outbound.descriptor();
-                                let payload_len = outbound.payload_len();
-                                let frame =
-                                    encode_issued_frame(outbound.frame()).map_err(|err| {
-                                        WorkerRuntimeError::ProtocolViolation(format!(
-                                            "failed to encode result page frame: {err}"
-                                        ))
-                                    })?;
-                                transport.send_peer_bytes(peer, &frame)?;
-                                metrics.stamp_page(
-                                    PageDirection::WorkerToBackend,
-                                    descriptor,
-                                    payload_len,
-                                );
-                                metrics.increment(MetricId::WorkerResultPagesTotal);
-                                metrics
-                                    .add(MetricId::WorkerResultBytesSentTotal, payload_len as u64);
-                                outbound.mark_sent();
-                            }
-                            Some(ResultPageStep::CloseFrame(frame)) => {
-                                debug!(
-                                    component = "worker",
-                                    session_epoch = result.session_epoch,
-                                    peer = ?peer,
-                                    "worker produced terminal result close frame"
-                                );
-                                let frame = encode_issued_frame(frame).map_err(|err| {
-                                    WorkerRuntimeError::ProtocolViolation(format!(
-                                        "failed to encode result close frame: {err}"
-                                    ))
-                                })?;
-                                transport.send_peer_bytes(peer, &frame)?;
-                            }
-                            None => break,
-                        }
-                    }
-                    Ok(())
-                })();
+                            peer,
+                            result.session_epoch,
+                            plan,
+                        ))
+                    });
 
                 match execution_result {
                     Ok(()) => {
@@ -449,6 +395,87 @@ fn handle_steps(
             }
         }
     }
+    Ok(())
+}
+
+fn build_datafusion_runtime() -> Result<tokio::runtime::Runtime, WorkerRuntimeError> {
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .map_err(|err| {
+            WorkerRuntimeError::ProtocolViolation(format!(
+                "failed to build DataFusion Tokio runtime: {err}"
+            ))
+        })
+}
+
+async fn execute_physical_plan(
+    transport: &mut TransportWorkerRuntime,
+    config: &crate::HostConfig,
+    page_pool: PagePool,
+    issuance_pool: IssuancePool,
+    metrics: RuntimeMetrics,
+    peer: BackendLeaseSlot,
+    session_epoch: u64,
+    plan: Arc<dyn ExecutionPlan>,
+) -> Result<(), WorkerRuntimeError> {
+    let stream = execute_stream(plan, Arc::new(TaskContext::default()))?;
+    let page_tx = PageTx::new(page_pool);
+    let payload_capacity = u32::try_from(page_tx.payload_capacity()).map_err(|_| {
+        WorkerRuntimeError::ProtocolViolation("result payload capacity exceeds u32".into())
+    })?;
+    let mut producer = ResultPageProducer::new(
+        stream,
+        IssuedTx::new(page_tx, issuance_pool),
+        payload_capacity,
+        ResultPageProducerConfig {
+            estimator: row_estimator::EstimatorConfig {
+                initial_tail_bytes_per_row: config.estimator_initial_tail_bytes_per_row,
+            },
+            metrics,
+            ..ResultPageProducerConfig::default()
+        },
+    )?;
+
+    loop {
+        match producer.next_step_async().await? {
+            Some(ResultPageStep::OutboundPage(outbound)) => {
+                trace!(
+                    component = "worker",
+                    session_epoch,
+                    peer = ?peer,
+                    "worker produced one result page"
+                );
+                let descriptor = outbound.descriptor();
+                let payload_len = outbound.payload_len();
+                let frame = encode_issued_frame(outbound.frame()).map_err(|err| {
+                    WorkerRuntimeError::ProtocolViolation(format!(
+                        "failed to encode result page frame: {err}"
+                    ))
+                })?;
+                transport.send_peer_bytes(peer, &frame)?;
+                metrics.stamp_page(PageDirection::WorkerToBackend, descriptor, payload_len);
+                metrics.increment(MetricId::WorkerResultPagesTotal);
+                metrics.add(MetricId::WorkerResultBytesSentTotal, payload_len as u64);
+                outbound.mark_sent();
+            }
+            Some(ResultPageStep::CloseFrame(frame)) => {
+                debug!(
+                    component = "worker",
+                    session_epoch,
+                    peer = ?peer,
+                    "worker produced terminal result close frame"
+                );
+                let frame = encode_issued_frame(frame).map_err(|err| {
+                    WorkerRuntimeError::ProtocolViolation(format!(
+                        "failed to encode result close frame: {err}"
+                    ))
+                })?;
+                transport.send_peer_bytes(peer, &frame)?;
+            }
+            None => break,
+        }
+    }
+
     Ok(())
 }
 
