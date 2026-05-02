@@ -103,9 +103,12 @@ page-backed Arrow batches.
    pages into shared memory.
 5. Worker imports scan pages as Arrow `RecordBatch` values, runs DataFusion
    operators under its current-thread Tokio runtime, writes Arrow result pages,
-   and sends issued frames back. Scan production remains on PostgreSQL
-   backend/scan-worker threads; Tokio only drives DataFusion planning,
-   multi-partition root collection, and result-stream polling.
+   and sends issued frames back. Zero-row plans whose DataFusion stream has an
+   empty schema, such as `EmptyExec`, use a close-only result path with no Arrow
+   pages; non-empty zero-column batches remain unsupported. Scan production
+   remains on PostgreSQL backend/scan-worker threads; Tokio only drives
+   DataFusion planning, multi-partition root collection, and result-stream
+   polling.
 6. Backend imports result pages with `slot_import` and projects rows into
    PostgreSQL tuple slots.
 

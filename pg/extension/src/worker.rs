@@ -16,7 +16,7 @@ use runtime_protocol::{ExecutionFailureCode, WorkerExecutionToBackend};
 use tracing::{debug, info, trace, warn, Level};
 use transfer::PageTx;
 use worker_runtime::{
-    DecodedInbound, ResultPageProducer, ResultPageProducerConfig, ResultPageStep,
+    DecodedInbound, ResultPageEmitter, ResultPageProducerConfig, ResultPageStep,
     ScanIngressProvider, TransportScanBatchSource, TransportWorkerRuntime, WorkerRuntimeCore,
     WorkerRuntimeError, WorkerRuntimeStep,
 };
@@ -423,7 +423,7 @@ async fn execute_physical_plan(
     let payload_capacity = u32::try_from(page_tx.payload_capacity()).map_err(|_| {
         WorkerRuntimeError::ProtocolViolation("result payload capacity exceeds u32".into())
     })?;
-    let mut producer = ResultPageProducer::new(
+    let mut producer = ResultPageEmitter::new(
         stream,
         IssuedTx::new(page_tx, issuance_pool),
         payload_capacity,

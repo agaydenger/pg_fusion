@@ -6402,16 +6402,6 @@ select q2, sql_if(q2 > 0, q2, q2 + 1) from int8_tbl;
 -- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(E42883), message: "function build_group(bigint, integer) does not exist", detail: None, hint: Some("No function matches the given name and argument types. You might need to add explicit type casts."), position: Some(Original(16)), where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("parse_func.c"), line: Some(636), routine: Some("ParseFuncOrColumn") }) }
 select build_group(q1,3) from int8_tbl;
 
--- id: privileges_295_select_from_select_a_q1_as_x_from_int8_tbl_a_offset_0_union_all_select_b_f057b913
--- origin: postgres REL_17_STABLE src/test/regress/sql/privileges.sql:440
--- compare: ordered
--- reason: query failed with pg_fusion.enable=on: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion execution failed: worker failed execution session_epoch=1 code=Internal detail=None", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("custom_scan.rs"), line: Some(495), routine: Some("pg_fusion::custom_scan::exec_pg_fusion_scan::exec_pg_fusion_scan_inner") }) }
-select * from
-  ((select a.q1 as x from int8_tbl a offset 0)
-   union all
-   (select b.q2 as x from int8_tbl b offset 0)) ss
-where false;
-
 -- id: rangefuncs_237_select_f1_rngfuncr_f1_from_int4_tbl_bc363d04
 -- origin: postgres REL_17_STABLE src/test/regress/sql/rangefuncs.sql:366
 -- compare: multiset
@@ -9585,12 +9575,6 @@ WITH cte (x) AS (
 SELECT x, (sum(x) over w)
 FROM cte
 WINDOW w AS (ORDER BY x groups between 1 preceding and 1 following);
-
--- id: window_242_select_count_over_partition_by_four_from_select_from_tenk1_union_all_sel_32804032
--- origin: postgres REL_17_STABLE src/test/regress/sql/window.sql:1051
--- compare: ordered
--- reason: query failed with pg_fusion.enable=on: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion execution failed: worker failed execution session_epoch=1 code=Internal detail=None", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("custom_scan.rs"), line: Some(495), routine: Some("pg_fusion::custom_scan::exec_pg_fusion_scan::exec_pg_fusion_scan_inner") }) }
-SELECT count(*) OVER (PARTITION BY four) FROM (SELECT * FROM tenk1 UNION ALL SELECT * FROM tenk2)s LIMIT 0;
 
 -- id: window_245_select_f1_sum_f1_over_partition_by_f1_range_between_1_preceding_and_1_fo_f3e37c6a
 -- origin: postgres REL_17_STABLE src/test/regress/sql/window.sql:1058

@@ -68,6 +68,8 @@ pub enum WorkerRuntimeError {
     UnsupportedResultColumnType { index: usize, data_type: String },
     #[error("result transport schema requires at least one output column")]
     EmptyResultSchema,
+    #[error("empty result schema stream produced {rows} row(s); cannot encode zero-column rows")]
+    EmptyResultSchemaWithRows { rows: usize },
     #[error(
         "no issued scan ingress is configured for session_epoch={session_epoch}, scan_id={scan_id}"
     )]

@@ -2983,3 +2983,17 @@ SELECT * FROM outermost ORDER BY 1;
 -- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:1073
 -- compare: multiset
 with cte(foo) as ( select 42 ) select * from ((select foo from cte)) q;
+
+-- id: privileges_295_select_from_select_a_q1_as_x_from_int8_tbl_a_offset_0_union_all_select_b_f057b913
+-- origin: postgres REL_17_STABLE src/test/regress/sql/privileges.sql:440
+-- compare: ordered
+select * from
+  ((select a.q1 as x from int8_tbl a offset 0)
+   union all
+   (select b.q2 as x from int8_tbl b offset 0)) ss
+where false;
+
+-- id: window_242_select_count_over_partition_by_four_from_select_from_tenk1_union_all_sel_32804032
+-- origin: postgres REL_17_STABLE src/test/regress/sql/window.sql:1051
+-- compare: ordered
+SELECT count(*) OVER (PARTITION BY four) FROM (SELECT * FROM tenk1 UNION ALL SELECT * FROM tenk2)s LIMIT 0;

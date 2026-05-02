@@ -45,6 +45,101 @@ pub enum ResultPageStep {
     CloseFrame(IssuedOwnedFrame),
 }
 
+/// Worker-side result stream emitter.
+///
+/// Non-empty schemas are encoded into Arrow result pages. Empty schemas are
+/// only valid for zero-row streams and emit just the terminal close frame.
+pub enum ResultPageEmitter {
+    Pages(ResultPageProducer),
+    CloseOnly(CloseOnlyResultProducer),
+}
+
+impl ResultPageEmitter {
+    /// Create an emitter from an executed physical-plan stream.
+    pub fn new(
+        stream: SendableRecordBatchStream,
+        tx: IssuedTx,
+        payload_capacity: u32,
+        config: ResultPageProducerConfig,
+    ) -> Result<Self, WorkerRuntimeError> {
+        if stream.schema().fields().is_empty() {
+            Ok(Self::CloseOnly(CloseOnlyResultProducer::new(stream, tx)))
+        } else {
+            ResultPageProducer::new(stream, tx, payload_capacity, config).map(Self::Pages)
+        }
+    }
+
+    /// Produce the next outbound page or close frame.
+    pub fn next_step(&mut self) -> Result<Option<ResultPageStep>, WorkerRuntimeError> {
+        futures::executor::block_on(self.next_step_async())
+    }
+
+    /// Async variant of [`Self::next_step`].
+    pub async fn next_step_async(&mut self) -> Result<Option<ResultPageStep>, WorkerRuntimeError> {
+        match self {
+            Self::Pages(producer) => producer.next_step_async().await,
+            Self::CloseOnly(producer) => producer.next_step_async().await,
+        }
+    }
+}
+
+/// Close-only result emitter for zero-row streams with empty Arrow schemas.
+pub struct CloseOnlyResultProducer {
+    tx: IssuedTx,
+    stream: SendableRecordBatchStream,
+    stream_exhausted: bool,
+    close_emitted: bool,
+}
+
+impl std::fmt::Debug for CloseOnlyResultProducer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloseOnlyResultProducer")
+            .field("stream_exhausted", &self.stream_exhausted)
+            .field("close_emitted", &self.close_emitted)
+            .finish()
+    }
+}
+
+impl CloseOnlyResultProducer {
+    fn new(stream: SendableRecordBatchStream, tx: IssuedTx) -> Self {
+        Self {
+            tx,
+            stream,
+            stream_exhausted: false,
+            close_emitted: false,
+        }
+    }
+
+    /// Produce the close frame once the empty-schema stream is exhausted.
+    pub fn next_step(&mut self) -> Result<Option<ResultPageStep>, WorkerRuntimeError> {
+        futures::executor::block_on(self.next_step_async())
+    }
+
+    /// Async variant of [`Self::next_step`].
+    pub async fn next_step_async(&mut self) -> Result<Option<ResultPageStep>, WorkerRuntimeError> {
+        loop {
+            if self.stream_exhausted {
+                if self.close_emitted {
+                    return Ok(None);
+                }
+                self.close_emitted = true;
+                return Ok(Some(ResultPageStep::CloseFrame(self.tx.close()?)));
+            }
+
+            match self.stream.next().await {
+                Some(Ok(batch)) if batch.num_rows() == 0 => continue,
+                Some(Ok(batch)) => {
+                    return Err(WorkerRuntimeError::EmptyResultSchemaWithRows {
+                        rows: batch.num_rows(),
+                    });
+                }
+                Some(Err(err)) => return Err(err.into()),
+                None => self.stream_exhausted = true,
+            }
+        }
+    }
+}
+
 /// Stateful worker-side encoder from Arrow `RecordBatch` stream to issued pages.
 ///
 /// This type owns no control-transport slot. Callers are responsible for
@@ -266,7 +361,8 @@ mod tests {
     use std::task::{Context, Poll};
 
     use arrow_array::{
-        ArrayRef, BinaryArray, Int64Array, RecordBatch, StringArray, StringViewArray,
+        ArrayRef, BinaryArray, Int64Array, RecordBatch, RecordBatchOptions, StringArray,
+        StringViewArray,
     };
     use datafusion::physical_plan::RecordBatchStream;
     use datafusion_common::Result as DFResult;
@@ -335,6 +431,27 @@ mod tests {
         (region, pool)
     }
 
+    fn init_result_channels() -> (OwnedRegion, OwnedRegion, IssuedTx, IssuedRx, u32) {
+        let (page_region, page_pool) = init_page_pool(512, 4);
+        let (issuance_region, issuance_pool) = init_issuance_pool(4);
+        let page_tx = transfer::PageTx::new(page_pool);
+        let payload_capacity =
+            u32::try_from(page_tx.payload_capacity()).expect("payload capacity fits u32");
+        let tx = IssuedTx::new(page_tx, issuance_pool);
+        let rx = IssuedRx::new(PageRx::new(page_pool), issuance_pool);
+        (page_region, issuance_region, tx, rx, payload_capacity)
+    }
+
+    fn assert_close_frame(step: ResultPageStep, rx: &IssuedRx) {
+        match step {
+            ResultPageStep::CloseFrame(frame) => match rx.accept(&frame).expect("accept close") {
+                IssueEvent::Closed => {}
+                IssueEvent::Page(_) => panic!("close frame must not yield page"),
+            },
+            ResultPageStep::OutboundPage(_) => panic!("empty-schema stream must not emit pages"),
+        }
+    }
+
     #[test]
     fn normalizes_variable_width_columns_to_views() {
         let schema = Arc::new(Schema::new(vec![
@@ -351,6 +468,83 @@ mod tests {
         assert_eq!(transport_schema.field(2).data_type(), &DataType::Int64);
         assert_eq!(specs[0], ColumnSpec::new(TypeTag::Utf8View, true));
         assert_eq!(specs[1], ColumnSpec::new(TypeTag::BinaryView, false));
+    }
+
+    #[test]
+    fn empty_schema_empty_stream_emits_terminal_close_only() {
+        let schema = Arc::new(Schema::empty());
+        let stream: SendableRecordBatchStream = Box::pin(TestStream {
+            schema,
+            batches: vec![],
+        });
+        let (_page_region, _issuance_region, tx, rx, payload_capacity) = init_result_channels();
+
+        let mut producer = ResultPageEmitter::new(
+            stream,
+            tx,
+            payload_capacity,
+            ResultPageProducerConfig::default(),
+        )
+        .expect("producer");
+
+        let step = producer
+            .next_step()
+            .expect("next step")
+            .expect("close step");
+        assert_close_frame(step, &rx);
+        assert!(producer.next_step().expect("exhausted").is_none());
+    }
+
+    #[test]
+    fn empty_schema_zero_row_batches_are_ignored_before_close() {
+        let schema = Arc::new(Schema::empty());
+        let batch = RecordBatch::new_empty(Arc::clone(&schema));
+        let stream: SendableRecordBatchStream = Box::pin(TestStream {
+            schema,
+            batches: vec![batch],
+        });
+        let (_page_region, _issuance_region, tx, rx, payload_capacity) = init_result_channels();
+
+        let mut producer = ResultPageEmitter::new(
+            stream,
+            tx,
+            payload_capacity,
+            ResultPageProducerConfig::default(),
+        )
+        .expect("producer");
+
+        let step = producer
+            .next_step()
+            .expect("next step")
+            .expect("close step");
+        assert_close_frame(step, &rx);
+        assert!(producer.next_step().expect("exhausted").is_none());
+    }
+
+    #[test]
+    fn empty_schema_non_empty_batch_is_rejected() {
+        let schema = Arc::new(Schema::empty());
+        let options = RecordBatchOptions::new().with_row_count(Some(2));
+        let batch = RecordBatch::try_new_with_options(Arc::clone(&schema), vec![], &options)
+            .expect("zero-column batch");
+        let stream: SendableRecordBatchStream = Box::pin(TestStream {
+            schema,
+            batches: vec![batch],
+        });
+        let (_page_region, _issuance_region, tx, _rx, payload_capacity) = init_result_channels();
+
+        let mut producer = ResultPageEmitter::new(
+            stream,
+            tx,
+            payload_capacity,
+            ResultPageProducerConfig::default(),
+        )
+        .expect("producer");
+
+        match producer.next_step().expect_err("must reject rows") {
+            WorkerRuntimeError::EmptyResultSchemaWithRows { rows } => assert_eq!(rows, 2),
+            err => panic!("unexpected error: {err}"),
+        }
     }
 
     #[test]
