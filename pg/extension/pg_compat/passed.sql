@@ -2951,6 +2951,15 @@ SELECT i,SUM(v::int) OVER (ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)
 -- compare: ordered
 SELECT 1 AS two UNION SELECT 2 ORDER BY 1;
 
+-- id: privileges_297_select_from_select_a_q1_as_x_random_from_int8_tbl_a_where_q1_0_union_all_e36af0b0
+-- origin: postgres REL_17_STABLE src/test/regress/sql/privileges.sql:449
+-- compare: multiset
+select * from
+  ((select a.q1 as x, random() from int8_tbl a where q1 > 0)
+   union all
+   (select b.q2 as x, random() from int8_tbl b where q2 > 0)) ss
+where x < 0;
+
 -- id: with_32_with_q1_x_y_as_select_hundred_sum_ten_from_tenk1_group_by_hundred_select_056e623e
 -- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:230
 -- compare: multiset
@@ -2958,6 +2967,17 @@ WITH q1(x,y) AS (
     SELECT hundred, sum(ten) FROM tenk1 GROUP BY hundred
   )
 SELECT count(*) FROM q1 WHERE y > (SELECT sum(y)/100 FROM q1 qsub);
+
+-- id: with_159_with_outermost_x_as_select_1_union_with_innermost_as_select_2_select_fro_efd6f00e
+-- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:1123
+-- compare: ordered
+WITH outermost(x) AS (
+  SELECT 1
+  UNION (WITH innermost as (SELECT 2)
+         SELECT * FROM innermost
+         UNION SELECT 3)
+)
+SELECT * FROM outermost ORDER BY 1;
 
 -- id: with_152_with_cte_foo_as_select_42_select_from_select_foo_from_cte_q_f22186fa
 -- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:1073

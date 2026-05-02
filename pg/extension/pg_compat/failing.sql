@@ -6412,16 +6412,6 @@ select * from
    (select b.q2 as x from int8_tbl b offset 0)) ss
 where false;
 
--- id: privileges_297_select_from_select_a_q1_as_x_random_from_int8_tbl_a_where_q1_0_union_all_e36af0b0
--- origin: postgres REL_17_STABLE src/test/regress/sql/privileges.sql:449
--- compare: multiset
--- reason: query failed with pg_fusion.enable=on: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion scan driver failed: cannot complete execution while 1 scan(s) are not terminal (0 currently active)", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("custom_scan.rs"), line: Some(565), routine: Some("pg_fusion::custom_scan::exec_pg_fusion_scan::exec_pg_fusion_scan_inner::{{closure}}") }) }
-select * from
-  ((select a.q1 as x, random() from int8_tbl a where q1 > 0)
-   union all
-   (select b.q2 as x, random() from int8_tbl b where q2 > 0)) ss
-where x < 0;
-
 -- id: rangefuncs_237_select_f1_rngfuncr_f1_from_int4_tbl_bc363d04
 -- origin: postgres REL_17_STABLE src/test/regress/sql/rangefuncs.sql:366
 -- compare: multiset
@@ -11544,18 +11534,6 @@ WITH RECURSIVE t(j) AS (
     SELECT j+1 FROM t WHERE j < 10
 )
 SELECT * FROM t;
-
--- id: with_159_with_outermost_x_as_select_1_union_with_innermost_as_select_2_select_fro_efd6f00e
--- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:1123
--- compare: ordered
--- reason: query failed with pg_fusion.enable=on: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(E57014), message: "canceling statement due to statement timeout", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("postgres.c"), line: Some(3407), routine: Some("ProcessInterrupts") }) }
-WITH outermost(x) AS (
-  SELECT 1
-  UNION (WITH innermost as (SELECT 2)
-         SELECT * FROM innermost
-         UNION SELECT 3)
-)
-SELECT * FROM outermost ORDER BY 1;
 
 -- id: with_163_with_a_as_select_q2_as_id_select_q1_as_x_from_int8_tbl_b_as_select_id_ro_12773c86
 -- origin: postgres REL_17_STABLE src/test/regress/sql/with.sql:1158
