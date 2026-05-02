@@ -17,6 +17,9 @@ Current scope:
 - worker bootstrap on top of `worker_runtime`
 - page-backed worker result production and backend result ingress
 - pgrx smoke tests for simple `SELECT`, `EXPLAIN`, and heap-backed `SELECT`
+- a committed `pg_compat` PostgreSQL 17 compatibility corpus that compares
+  vanilla PostgreSQL results with `pg_fusion` results for supported SELECT
+  shapes
 
 ## Current limitation
 

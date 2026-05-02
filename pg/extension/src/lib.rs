@@ -10,6 +10,8 @@ mod diag;
 mod guc;
 mod logging;
 mod metrics;
+#[cfg(feature = "pg_test")]
+mod pg_compat;
 mod planner;
 mod result_ingress;
 #[cfg(feature = "pg_test")]
@@ -134,6 +136,11 @@ mod tests {
     #[pg_test]
     fn pg_fusion_metrics_smoke() {
         super::smoke_tests::metrics_smoke();
+    }
+
+    #[pg_test]
+    fn pg_fusion_pg_compat_allowlist() {
+        super::pg_compat::pg_compat_allowlist();
     }
 }
 

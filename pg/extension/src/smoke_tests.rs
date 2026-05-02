@@ -42,13 +42,13 @@ fn wait_for_worker() {
     }
 }
 
-fn smoke_client() -> Client {
+pub(crate) fn smoke_client() -> Client {
     wait_for_worker();
     let (client, _session_id) = pgrx_tests::client().expect("connect to pgrx test cluster");
     client
 }
 
-fn smoke_transaction(client: &mut Client) -> Transaction<'_> {
+pub(crate) fn smoke_transaction(client: &mut Client) -> Transaction<'_> {
     ensure_shared_preload(client);
     let mut tx = client.transaction().expect("start smoke-test transaction");
     tx.batch_execute(&format!(
@@ -61,7 +61,7 @@ fn smoke_transaction(client: &mut Client) -> Transaction<'_> {
     tx
 }
 
-fn batch_execute_pg_fusion_disabled(tx: &mut Transaction<'_>, sql: &str) {
+pub(crate) fn batch_execute_pg_fusion_disabled(tx: &mut Transaction<'_>, sql: &str) {
     tx.batch_execute("SET LOCAL pg_fusion.enable = off")
         .expect("disable pg_fusion during fixture setup");
     tx.batch_execute(sql)
@@ -91,7 +91,10 @@ fn simple_query_first_column_tx(tx: &mut Transaction<'_>, sql: &str) -> Option<S
         })
 }
 
-fn simple_query_first_column_rows_tx(tx: &mut Transaction<'_>, sql: &str) -> Vec<String> {
+pub(crate) fn simple_query_first_column_rows_tx(
+    tx: &mut Transaction<'_>,
+    sql: &str,
+) -> Vec<String> {
     tx.simple_query(sql)
         .expect("simple query must succeed")
         .into_iter()

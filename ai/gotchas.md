@@ -3,7 +3,7 @@ id: gotchas-0001
 type: gotcha
 scope: repo
 tags: ["shm", "pgrx", "slot_scan", "arrow", "testing"]
-updated_at: "2026-04-29"
+updated_at: "2026-05-01"
 importance: 0.7
 ---
 
@@ -25,6 +25,14 @@ importance: 0.7
   library coverage: they reference PostgreSQL backend symbols. Keep their
   coverage in pgrx tests (`cargo pgrx test pg17 -p pg_test` and
   `cargo pgrx test pg17 -p pg_fusion --features pg_test`).
+- The committed `pg_compat` corpus under `pg/extension/pg_compat` is a
+  differential pgrx test, not upstream `pg_regress`: fixtures are local,
+  `passed.sql` cases must use `Custom Scan (PgFusionScan)`, and results are
+  compared with `pg_fusion.enable` off versus on in the same cluster.
+  The current PostgreSQL 17 corpus is intentionally split into executable
+  `passed.sql` coverage and non-executed `failing.sql` backlog; widening it
+  should preserve that split instead of making the pgrx runner execute known
+  unsupported/crash repros.
 - Standalone unit-test crates should not dev-depend on PostgreSQL/SPI-backed
   crates just for fixtures. For example, `plan_codec` tests use synthetic
   `PgScanNode` plans; live `PlanBuilder`/catalog roundtrips belong in
