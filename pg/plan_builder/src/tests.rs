@@ -682,6 +682,15 @@ fn leaves_single_use_cte_inline() {
 }
 
 #[test]
+fn parses_postgresql_cte_materialization_hint() {
+    let built = build_sql("WITH u AS NOT MATERIALIZED (SELECT id FROM users) SELECT id FROM u");
+
+    assert_eq!(built.scans.len(), 1);
+    assert_eq!(count_cte_ref_nodes(&built.logical_plan), 0);
+    assert!(!contains_table_scan(&built.logical_plan));
+}
+
+#[test]
 fn config_defaults_to_single_target_partition() {
     let builder = builder();
     assert_eq!(builder.config().target_partitions, 1);

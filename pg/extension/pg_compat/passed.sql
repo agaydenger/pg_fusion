@@ -2997,3 +2997,32 @@ where false;
 -- origin: postgres REL_17_STABLE src/test/regress/sql/window.sql:1051
 -- compare: ordered
 SELECT count(*) OVER (PARTITION BY four) FROM (SELECT * FROM tenk1 UNION ALL SELECT * FROM tenk2)s LIMIT 0;
+
+-- id: aggregates_308_select_min_unique1_filter_where_unique1_100_from_tenk1_a93ebf4b
+-- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:846
+-- compare: multiset
+select min(unique1) filter (where unique1 > 100) from tenk1;
+
+-- id: aggregates_309_select_sum_1_ten_filter_where_ten_0_from_tenk1_7d8890f1
+-- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:850
+-- compare: multiset
+select sum(1/ten) filter (where ten > 0) from tenk1;
+
+-- id: aggregates_310_select_ten_sum_distinct_four_filter_where_four_text_123_from_onek_a_grou_3dc69b39
+-- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:852
+-- compare: multiset
+select ten, sum(distinct four) filter (where four::text ~ '123') from onek a
+group by ten;
+
+-- id: groupingsets_79_select_ten_sum_distinct_four_filter_where_four_text_123_from_onek_a_grou_4a34ea32
+-- origin: postgres REL_17_STABLE src/test/regress/sql/groupingsets.sql:297
+-- compare: multiset
+select ten, sum(distinct four) filter (where four::text ~ '123') from onek a
+group by rollup(ten);
+
+-- id: join_336_with_ctetable_as_not_materialized_select_1_as_f1_select_from_ctetable_c1_761db13e
+-- origin: postgres REL_17_STABLE src/test/regress/sql/join.sql:1311
+-- compare: multiset
+with ctetable as not materialized ( select 1 as f1 )
+select * from ctetable c1
+where f1 in ( select c3.f1 from ctetable c2 full join ctetable c3 on true );

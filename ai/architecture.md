@@ -60,7 +60,10 @@ page-backed Arrow batches.
    function/table-function range entries produced by PostgreSQL rewrite, then
    deparses wrapper query strings such as `EXPLAIN` and `COPY (SELECT ...)` back
    to the inner `Query` text so PostgreSQL can keep native wrapper execution
-   around a pg_fusion custom scan. It then resolves PostgreSQL catalog metadata
+   around a pg_fusion custom scan. Eligible user query text is parsed with
+   sqlparser's PostgreSQL dialect before DataFusion planning, which accepts more
+   PostgreSQL surface syntax but does not make unsupported PostgreSQL semantics
+   executable. It then resolves PostgreSQL catalog metadata
    for eligible user queries, runs DataFusion logical optimization, then uses
    `pg_statistics` plus `join_order` to reorder
    eligible inner/cross join components before scan lowering. The reorder pass

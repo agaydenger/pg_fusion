@@ -39,6 +39,7 @@ use datafusion_sql::sqlparser::ast::{
     Cte, CteAsMaterialized, Ident, ObjectName, Query, Statement as SqlStatement, Visit, Visitor,
     With,
 };
+use datafusion_sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion_sql::sqlparser::parser::ParserError;
 use df_catalog::{CatalogResolver, PgrxCatalogResolver, ResolveError, ResolvedTable};
 use once_cell::sync::Lazy;
@@ -221,7 +222,8 @@ where
 }
 
 fn parse_one_query(sql: &str) -> Result<DFStatement, PlanBuildError> {
-    let mut statements = DFParser::parse_sql(sql)?;
+    let dialect = PostgreSqlDialect {};
+    let mut statements = DFParser::parse_sql_with_dialect(sql, &dialect)?;
     let count = statements.len();
     if count != 1 {
         return Err(PlanBuildError::MultipleStatements { count });

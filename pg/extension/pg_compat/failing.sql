@@ -857,25 +857,6 @@ select * from v_pagg_test order by y;
 -- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(E42P01), message: "relation \"pagg_test\" does not exist", detail: None, hint: None, position: Some(Original(61)), where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("parse_relation.c"), line: Some(1452), routine: Some("parserOpenTable") }) }
 select array_dims(array_agg(s)) from (select * from pagg_test) s;
 
--- id: aggregates_308_select_min_unique1_filter_where_unique1_100_from_tenk1_a93ebf4b
--- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:846
--- compare: multiset
--- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion planner build failed: failed to parse SQL: sql parser error: Expected end of statement, found: (", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("planner.rs"), line: Some(164), routine: Some("pg_fusion::planner::build_planned_custom_scan::build_planned_custom_scan_inner::{{closure}}") }) }
-select min(unique1) filter (where unique1 > 100) from tenk1;
-
--- id: aggregates_309_select_sum_1_ten_filter_where_ten_0_from_tenk1_7d8890f1
--- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:850
--- compare: multiset
--- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion planner build failed: failed to parse SQL: sql parser error: Expected end of statement, found: (", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("planner.rs"), line: Some(164), routine: Some("pg_fusion::planner::build_planned_custom_scan::build_planned_custom_scan_inner::{{closure}}") }) }
-select sum(1/ten) filter (where ten > 0) from tenk1;
-
--- id: aggregates_310_select_ten_sum_distinct_four_filter_where_four_text_123_from_onek_a_grou_3dc69b39
--- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:852
--- compare: multiset
--- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion planner build failed: failed to parse SQL: sql parser error: Expected end of statement, found: (", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("planner.rs"), line: Some(164), routine: Some("pg_fusion::planner::build_planned_custom_scan::build_planned_custom_scan_inner::{{closure}}") }) }
-select ten, sum(distinct four) filter (where four::text ~ '123') from onek a
-group by ten;
-
 -- id: aggregates_311_select_ten_sum_distinct_four_filter_where_four_10_from_onek_a_group_by_t_40219ed0
 -- origin: postgres REL_17_STABLE src/test/regress/sql/aggregates.sql:855
 -- compare: multiset
@@ -3356,13 +3337,6 @@ select ten, grouping(ten) from onek
 group by grouping sets(ten, four) having grouping(ten) > 0
 order by 2,1;
 
--- id: groupingsets_79_select_ten_sum_distinct_four_filter_where_four_text_123_from_onek_a_grou_4a34ea32
--- origin: postgres REL_17_STABLE src/test/regress/sql/groupingsets.sql:297
--- compare: multiset
--- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion planner build failed: failed to parse SQL: sql parser error: Expected end of statement, found: (", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("planner.rs"), line: Some(164), routine: Some("pg_fusion::planner::build_planned_custom_scan::build_planned_custom_scan_inner::{{closure}}") }) }
-select ten, sum(distinct four) filter (where four::text ~ '123') from onek a
-group by rollup(ten);
-
 -- id: groupingsets_80_select_from_values_1_2_v_a_left_join_lateral_select_v_a_four_ten_count_f_0d7ef6e1
 -- origin: postgres REL_17_STABLE src/test/regress/sql/groupingsets.sql:301
 -- compare: ordered
@@ -5471,14 +5445,6 @@ select * from
            union all
            select a as b) as t3
 where b;
-
--- id: join_336_with_ctetable_as_not_materialized_select_1_as_f1_select_from_ctetable_c1_761db13e
--- origin: postgres REL_17_STABLE src/test/regress/sql/join.sql:1311
--- compare: multiset
--- reason: explain failed: Error { kind: Db, cause: Some(DbError { severity: "ERROR", parsed_severity: Some(Error), code: SqlState(EXX000), message: "pg_fusion planner build failed: failed to parse SQL: sql parser error: Expected: (, found: NOT", detail: None, hint: None, position: None, where_: None, schema: None, table: None, column: None, datatype: None, constraint: None, file: Some("planner.rs"), line: Some(164), routine: Some("pg_fusion::planner::build_planned_custom_scan::build_planned_custom_scan_inner::{{closure}}") }) }
-with ctetable as not materialized ( select 1 as f1 )
-select * from ctetable c1
-where f1 in ( select c3.f1 from ctetable c2 full join ctetable c3 on true );
 
 -- id: join_344_select_t1_a_s_a_from_t_append_t1_left_join_t_append_t2_on_t1_a_t2_b_join_38da46f0
 -- origin: postgres REL_17_STABLE src/test/regress/sql/join.sql:1345
